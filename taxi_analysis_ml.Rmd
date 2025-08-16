@@ -1,0 +1,370 @@
+---
+title: "Distributed Data Analysis Coursework"
+author: "Rakshitha Kamarathi Venkatesh"
+date: "2025-04-16"
+output: html_document
+---
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents.
+
+```{r}
+library(data.table)  # For fast data handling
+library(dplyr)       # For data manipulation
+library(ggplot2)     # For visualization
+library(lubridate)   # For date-time processing
+library(caret)       # For preprocessing and ML tasks
+library(ggcorrplot)
+library(leaflet)
+
+```
+
+# Reading the dataset
+```{r}
+
+taxi_data <- read.csv("/Users/rakshitha0897/Desktop/DDA_RAKSHITHA/yellowtaxi.csv")
+```
+
+# View structure and summary
+```{r}
+
+str(taxi_data)
+summary(taxi_data)
+head(taxi_data)
+
+```
+
+#Finding the missing values
+```{r}
+colSums(is.na(taxi_data))  # Count missing values in each column
+```
+
+#removing the missing(NA's) values
+```{r}
+taxi_data <- taxi_data %>% filter(!is.na(improvement_surcharge))
+```
+
+```{r}
+#removing the ratecodeid values more than 6 
+taxi_data <- taxi_data %>%
+  filter(RateCodeID >= 1 & RateCodeID <= 6)
+```
+
+#Removing the negative values
+```{r}
+taxi_data <- taxi_data %>%
+  filter(trip_distance > 0, 
+         fare_amount > 0, 
+         total_amount > 0,
+         extra>0,
+         passenger_count>0,
+         improvement_surcharge >= 0.30,
+         mta_tax >= 0.50)
+```
+
+#Setting the observations according to meta data
+```{r}
+# Trip distance issues
+sum(taxi_data$trip_distance > 300)
+taxi_data <- taxi_data %>% filter(trip_distance <= 300)
+
+#Max tip_amount: $888.20 🚨 (Likely a mistake).
+#Max tolls_amount: $1000.66 🚨 (Toll should not exceed ~$50).
+#Fix: Cap values at realistic limits (e.g., $100 for tips, $50 for tolls).
+taxi_data <- taxi_data %>%
+  filter(tip_amount <= 100, tolls_amount <= 50)
+
+## fare_amount & total_amount Issues
+#Max total_amount: $4009.30 🚨 (Extreme outlier)
+#Mean fare is $11.38, which is reasonable.
+#Fix: Cap total amount at $500.
+taxi_data <- taxi_data %>%
+  filter(total_amount <= 1000)
+
+```
+
+## Filter pickup and dropoff latitude and longitude to NYC
+```{r}
+taxi_data <- taxi_data %>%
+  filter(between(pickup_latitude, 40, 41) & between(pickup_longitude, -75, -73))
+
+taxi_data <- taxi_data %>%
+  filter(between(dropoff_latitude, 40, 41) & between(dropoff_longitude, -75, -73))
+```
+
+# Convert VendorID, RateCodeID, store_and_fwd_flag, passenger_count and payment_type to categorical variables
+```{r}
+taxi_data$VendorID <- as.factor(taxi_data$VendorID)
+taxi_data$RateCodeID <- as.factor(taxi_data$RateCodeID)
+taxi_data$store_and_fwd_flag <- as.factor(taxi_data$store_and_fwd_flag)
+taxi_data$payment_type <- as.factor(taxi_data$payment_type)
+taxi_data$passenger_count <- as.factor(taxi_data$passenger_count)
+```
+
+# Convert datetime columns
+```{r}
+taxi_data$tpep_pickup_datetime <- ymd_hms(taxi_data$tpep_pickup_datetime)
+taxi_data$tpep_dropoff_datetime <- ymd_hms(taxi_data$tpep_dropoff_datetime)
+```
+
+
+```{r}
+summary(taxi_data)
+
+```
+
+
+#Exploratory Data Analysis
+
+```{r}
+
+ggplot(taxi_data, aes(x = fare_amount)) +
+  geom_histogram(binwidth = 2, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Fare Amount", x = "Fare ($)", y = "Count")
+```
+
+```{r}
+ggplot(taxi_data, aes(x = factor(passenger_count), y = fare_amount)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Fare Amount by Passenger Count", x = "Passenger Count", y = "Fare Amount ($)")
+```
+
+```{r}
+ggplot(taxi_data, aes(x = trip_distance, y = fare_amount)) +
+  geom_point(alpha = 0.3) +
+  labs(title = "Fare Amount vs. Trip Distance")
+```
+
+```{r}
+ggplot(taxi_data, aes(x = fare_amount, y = tip_amount)) +
+  geom_point(alpha = 0.5, color = "darkblue") +
+  labs(title = "Tip vs Fare Amount", x = "Fare ($)", y = "Tip ($)")
+```
+
+#UNSUPERVISED MACHINE LEARNING FOR EDA
+```{r}
+# Load necessary libraries
+
+library(ggplot2)
+library(scales)
+```
+
+
+```{r}
+# Sample the dataset for performance
+set.seed(123)
+taxi_sample <- taxi_data %>% sample_n(25000)
+```
+
+
+```{r}
+# Select and convert relevant numeric features
+pca_data <- taxi_sample %>%
+  select(fare_amount, trip_distance, tip_amount) %>%
+  mutate(across(everything(), as.numeric))
+```
+
+
+```{r}
+# Scale the data
+scaled_data <- scale(pca_data)
+```
+
+
+```{r}
+# Perform PCA
+pca_result <- prcomp(scaled_data, center = TRUE, scale. = TRUE)
+```
+
+
+```{r}
+# Extract explained variance (Proportion of variance)
+explained_variance <- summary(pca_result)$importance[2, ]
+```
+
+
+```{r}
+# Create a data frame for plotting
+explained_variance_df <- data.frame(
+  PC = paste0("PC", 1:length(explained_variance)),
+  Variance = explained_variance
+)
+```
+
+
+```{r}
+# Bar plot of variance explained
+ggplot(explained_variance_df, aes(x = PC, y = Variance)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black", alpha = 0.7) +
+  geom_text(aes(label = percent(Variance)), vjust = -0.5, size = 4, color = "black") +
+  labs(title = "PCA: Variance Explained by Each Principal Component",
+       x = "Principal Components",
+       y = "Proportion of Variance Explained") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+# Scree plot
+screeplot(pca_result,
+          main = "PCA: Scree Plot",
+          col = "skyblue",
+          type = "lines")
+
+```
+
+
+
+
+K-MEANS CLUSTERING 
+
+```{r}
+
+
+# Sample for performance
+set.seed(123)
+taxi_sample <- taxi_data %>%
+  sample_n(25000) %>%
+  select(fare_amount, trip_distance, tip_amount, passenger_count) %>%
+  filter(fare_amount > 0, trip_distance > 0, tip_amount >= 0) %>%
+  mutate(across(everything(), as.numeric))
+
+# Scale the data (important for K-means)
+scaled_data <- scale(taxi_sample)
+
+# Apply K-means clustering with K = 3
+set.seed(123)
+kmeans_result <- kmeans(scaled_data, centers = 3, nstart = 25)
+
+# Add cluster labels to the original (unscaled) data
+taxi_sample$cluster <- as.factor(kmeans_result$cluster)
+
+# Step: Determine which cluster is low/medium/high by mean fare
+cluster_levels <- taxi_sample %>%
+  group_by(cluster) %>%
+  summarise(mean_fare = mean(fare_amount)) %>%
+  arrange(mean_fare)
+
+# Re-label clusters based on average fare
+fare_labels <- c("Low", "Medium", "High")
+names(fare_labels) <- cluster_levels$cluster
+taxi_sample$fare_group <- fare_labels[taxi_sample$cluster]
+
+# Visualise clusters by fare group
+ggplot(taxi_sample, aes(x = trip_distance, y = fare_amount, color = fare_group)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "K-Means Clustering (K=3): Fare Categories by Trip Distance",
+       x = "Trip Distance (miles)",
+       y = "Fare Amount ($)",
+       color = "Fare Group") +
+  theme_minimal()
+
+```
+
+#Machine learing Model
+ 
+
+
+```{r}
+# Load libraries
+
+library(rpart)
+library(rpart.plot)
+library(Metrics)  # for MAE and RMSE
+
+```
+#Machine learning Algorithm 
+
+```{r}
+# Sample the data for performance
+set.seed(123)
+taxi_sample <- taxi_data %>% sample_n(25000)
+```
+
+
+```{r}
+# Preprocess: select, convert to numeric, and filter
+taxi_model_data <- taxi_sample %>%
+  select(fare_amount, trip_distance, tip_amount, passenger_count,
+         pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  filter(fare_amount > 0, trip_distance > 0, tip_amount >= 0, passenger_count > 0)
+```
+
+
+```{r}
+# Split into training/testing sets (70/30)
+set.seed(123)
+train_index <- createDataPartition(taxi_model_data$fare_amount, p = 0.7, list = FALSE)
+train_data <- taxi_model_data[train_index, ]
+test_data  <- taxi_model_data[-train_index, ]
+```
+
+
+```{r}
+# Train Control for cross-validation
+control <- trainControl(method = "cv", number = 5)
+```
+
+
+```{r}
+# Define tuning grid for cp
+tune_grid <- expand.grid(cp = seq(0.001, 0.05, by = 0.002))
+```
+
+
+```{r}
+# Train the decision tree using caret with tuning
+set.seed(123)
+tree_tuned <- train(fare_amount ~ ., 
+                    data = train_data, 
+                    method = "rpart",
+                    trControl = control,
+                    tuneGrid = tune_grid)
+```
+
+
+```{r}
+# Best cp value
+print(tree_tuned$bestTune)
+```
+
+
+```{r}
+# Visualize the tuned tree
+rpart.plot(tree_tuned$finalModel, main = "Tuned Decision Tree")
+```
+
+
+```{r}
+# Predict on test data
+pred <- predict(tree_tuned, newdata = test_data)
+```
+
+
+```{r}
+# Evaluate performance
+rmse_val <- rmse(test_data$fare_amount, pred)
+mae_val <- mae(test_data$fare_amount, pred)
+r2_val <- cor(test_data$fare_amount, pred)^2
+
+cat("RMSE:", round(rmse_val, 3), "\n")
+cat("MAE :", round(mae_val, 3), "\n")
+cat("R²  :", round(r2_val, 4), "\n")
+
+```
+
+
+
+
+
+`
+
+
+
+
+
+
