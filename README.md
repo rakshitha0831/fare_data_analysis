@@ -1,6 +1,7 @@
 ![R](https://img.shields.io/badge/Language-R-blue)
 ![Data Analysis](https://img.shields.io/badge/Domain-Distributed%20Data%20Analysis-orange)
 ![Status](https://img.shields.io/badge/Status-Completed-brightgreen)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 # Distributed Data Analysis & Fare Prediction on NYC Taxi Data
 
